@@ -128,7 +128,9 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
             MerkleProof.verify(merkleProof, merkleRoot, keccak256(abi.encodePacked(claimAddress, whiteQuantity))),
             'error:10004 not in the whitelist'
         );
-        _safeMint(claimAddress, quantity);
+        for(uint256 i; i < quantity; i++){
+            _safeMint( claimAddress, supply + i + 1 );
+        }
         privateClaimList[claimAddress] = true;
         _privateMintCount = _privateMintCount + quantity;
     }
@@ -141,7 +143,10 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
         address claimAddress = _msgSender();
         require(!publicClaimList[claimAddress], 'error:10003 already claimed');
-        _safeMint(claimAddress, quantity);
+        // _safeMint(claimAddress, quantity);
+        for(uint256 i; i < quantity; i++){
+            _safeMint( claimAddress, supply + i + 1 );
+        }
         publicClaimList[claimAddress] = true;
     }
 
