@@ -129,7 +129,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
             'error:10004 not in the whitelist'
         );
         for(uint256 i; i < quantity; i++){
-            _safeMint( claimAddress, supply + i + 1 );
+            _safeMint( claimAddress, supply + i );
         }
         privateClaimList[claimAddress] = true;
         _privateMintCount = _privateMintCount + quantity;
@@ -145,7 +145,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         require(!publicClaimList[claimAddress], 'error:10003 already claimed');
         // _safeMint(claimAddress, quantity);
         for(uint256 i; i < quantity; i++){
-            _safeMint( claimAddress, supply + i + 1 );
+            _safeMint( claimAddress, supply + i );
         }
         publicClaimList[claimAddress] = true;
     }
