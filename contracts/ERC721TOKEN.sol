@@ -29,7 +29,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
     }
 
     struct TimeZone {
-        uint8 offset;
+        int8 offset;
         string text;
     }
 
