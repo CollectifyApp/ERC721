@@ -4,13 +4,14 @@
 
 pragma solidity ^0.8.4;
 
-// import '@openzeppelin/contracts/token/ERC721/ERC721.sol';
-// import './ERC721.sol';
-import './ERC721Enumerable.sol';
-import './IERC721Enumerable.sol';
-import './ERC2981.sol';
-import '@openzeppelin/contracts/utils/cryptography/MerkleProof.sol';
-import '@openzeppelin/contracts/access/Ownable.sol';
+// import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+// import "./ERC721.sol";
+import "./ERC721Enumerable.sol";
+import "./IERC721Enumerable.sol";
+import "./ERC2981.sol";
+import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
     bytes32 public merkleRoot;
@@ -19,6 +20,10 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
     uint256 public maxCountPerAddress;
     uint256 public _privateMintCount;
     string public baseURI;
+    address public tokenContract;
+
+    address[] private _operatorFilterAddresses;
+    
     MintTime public privateMintTime;
     MintTime public publicMintTime;
     TimeZone public timeZone;
@@ -51,7 +56,8 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         uint96 royaltyFraction,
         TimeZone memory _timezone,
         MintTime memory _privateMintTime,
-        MintTime memory _publicMintTime
+        MintTime memory _publicMintTime,
+        address _tokenContract
     ) ERC721(name, symbol) {
         mintPrice = _mintPrice;
         maxSupply = _maxSupply;
@@ -60,10 +66,31 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         timeZone = _timezone;
         privateMintTime = _privateMintTime;
         publicMintTime = _publicMintTime;
+        tokenContract = _tokenContract;
         _setDefaultRoyalty(_msgSender(), royaltyFraction);
     }
 
-    function  _baseURI() internal view virtual override returns (string memory) {
+    modifier onlyAllowedOperatorApproval(address operator) {
+        for (uint256 i = 0; i < _operatorFilterAddresses.length; i++) {
+            require(
+                operator != _operatorFilterAddresses[i],
+                "ERC721: operator not allowed"
+            );
+        }
+        _;
+    }
+
+    modifier onlyAllowedOperator(address from) {
+        for (uint256 i = 0; i < _operatorFilterAddresses.length; i++) {
+            require(
+                from != _operatorFilterAddresses[i],
+                "ERC721: operator not allowed"
+            );
+        }
+        _;
+    }
+
+    function _baseURI() internal view virtual override returns (string memory) {
         return baseURI;
     }
 
@@ -117,11 +144,24 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         publicMintTime = _publicMintTime;
     }
 
+    function changeOperatorFilterAddresses(address[] memory _addresses) public onlyOwner {
+        _operatorFilterAddresses = _addresses;
+    }
+
+    function changeOperatorFilterAddressesAndMintTime(address[] memory _addresses, MintTime memory _publicMintTime, MintTime memory _privateMintTime) public onlyOwner {
+        _operatorFilterAddresses = _addresses;
+        privateMintTime = _privateMintTime;
+        publicMintTime = _publicMintTime;
+    }
+
+    function operatorFilterAddresses() public view returns (address[] memory) {
+        return _operatorFilterAddresses;
+    }
+
     function privateMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof) external payable {
         require(block.timestamp >= privateMintTime.startAt && block.timestamp <= privateMintTime.endAt, "error: 10000 time is not allowed");
         uint256 supply = totalSupply();
         require(supply + quantity <= maxSupply, "error: 10001 supply exceeded");
-        require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
         address claimAddress = _msgSender();
         require(!privateClaimList[claimAddress], "error:10003 already claimed");
         require(quantity <= whiteQuantity, "error: 10004 quantity is not allowed");
@@ -129,11 +169,24 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
             MerkleProof.verify(merkleProof, merkleRoot, keccak256(abi.encodePacked(claimAddress, whiteQuantity))),
             "error:10004 not in the whitelist"
         );
+
+
+        if (tokenContract == address(0)) {
+            require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
+        } else {
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice * quantity));
+            require(
+                success && (data.length == 0 || abi.decode(data, (bool))),
+                "error: 10002 price insufficient"
+            );
+        }
+
+        privateClaimList[claimAddress] = true;
+        _privateMintCount = _privateMintCount + quantity;
+
         for(uint256 i; i < quantity; i++){
             _safeMint( claimAddress, supply + i );
         }
-        privateClaimList[claimAddress] = true;
-        _privateMintCount = _privateMintCount + quantity;
     }
 
     function publicMint(uint256 quantity) external payable {
@@ -141,14 +194,22 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         require(quantity <= maxCountPerAddress, "error: 10004 max per address exceeded");
         uint256 supply = totalSupply();
         require(supply + quantity <= maxSupply, "error: 10001 supply exceeded");
-        require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
         address claimAddress = _msgSender();
         require(!publicClaimList[claimAddress], "error:10003 already claimed");
         // _safeMint(claimAddress, quantity);
+        if (tokenContract == address(0)) {
+            require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
+        } else {
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice * quantity));
+            require(
+                success && (data.length == 0 || abi.decode(data, (bool))),
+                "error: 10002 price insufficient"
+            );
+        }
+        publicClaimList[claimAddress] = true;
         for(uint256 i; i < quantity; i++){
             _safeMint( claimAddress, supply + i );
         }
-        publicClaimList[claimAddress] = true;
     }
 
     function supportsInterface(bytes4 interfaceId)
@@ -170,9 +231,42 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
             ERC2981.supportsInterface(interfaceId);
     }
 
+    function setApprovalForAll(address operator, bool approved) public override(ERC721, IERC721) onlyAllowedOperatorApproval(operator) {
+        super.setApprovalForAll(operator, approved);
+    }
+
+    function approve(address operator, uint256 tokenId) public override(ERC721, IERC721) onlyAllowedOperatorApproval(operator) {
+        super.approve(operator, tokenId);
+    }
+
+    function transferFrom(address from, address to, uint256 tokenId) public override(ERC721, IERC721) onlyAllowedOperator(from) {
+        super.transferFrom(from, to, tokenId);
+    }
+
+    function safeTransferFrom(address from, address to, uint256 tokenId) public override(ERC721, IERC721) onlyAllowedOperator(from) {
+        super.safeTransferFrom(from, to, tokenId);
+    }
+
+    function safeTransferFrom(address from, address to, uint256 tokenId, bytes memory data)
+        public
+        override(ERC721, IERC721)
+        onlyAllowedOperator(from)
+    {
+        super.safeTransferFrom(from, to, tokenId, data);
+    }
+
     // This allows the contract owner to withdraw the funds from the contract.
     function withdraw(uint amt) external onlyOwner {
-        (bool sent, ) = payable(_msgSender()).call{value: amt}("");
-        require(sent, "GG: Failed to withdraw Ether");
+        if (tokenContract == address(0)) {
+            (bool sent, ) = payable(_msgSender()).call{value: amt}("");
+            require(sent, "GG: Failed to withdraw Ether");
+        } else {
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0xa9059cbb, _msgSender(), amt));
+            require(
+                success && (data.length == 0 || abi.decode(data, (bool))),
+                "GG: Failed to withdraw Ether"
+            );
+        }
+
     }
 }
