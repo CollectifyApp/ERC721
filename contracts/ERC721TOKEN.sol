@@ -14,23 +14,46 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
-    bytes32 public merkleRoot;
+    MerkleRoot public merkleRoot;
     uint256 public maxSupply;
-    uint256 public mintPrice;
+    MintPrice public mintPrice;
     uint256 public maxCountPerAddress;
-    uint256 public _privateMintCount;
+    MintCount public mintCount;
     string public baseURI;
     address public tokenContract;
 
     address[] private _operatorFilterAddresses;
     
     MintTime public privateMintTime;
+    MintTime public luckyMintTime;
     MintTime public publicMintTime;
     TimeZone public timeZone;
 
     struct MintTime {
         uint64 startAt;
         uint64 endAt;
+    }
+
+    struct MintTimeStruct {
+        MintTime privateMintTime;
+        MintTime luckyMintTime;
+        MintTime publicMintTime;
+    }
+
+    struct MintPrice {
+        uint256 privateMintPrice;
+        uint256 luckyMintPrice;
+        uint256 publicMintPrice;
+    }
+
+    struct MerkleRoot {
+        bytes32 privateMerkleRoot;
+        bytes32 luckyMerkleRoot;
+    }
+
+    struct MintCount {
+        uint256 privateMintCount;
+        uint256 luckyMintCount;
     }
 
     struct TimeZone {
@@ -40,23 +63,24 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
 
     struct MintState {
         bool privateMinted;
+        bool luckyMinted;
         bool publicMinted;
     }
 
     mapping(address => bool) internal privateClaimList;
+    mapping(address => bool) internal luckyClaimList;
     mapping(address => bool) internal publicClaimList;
 
     constructor(
         string memory name,
         string memory symbol,
-        uint256 _mintPrice,
+        MintPrice memory _mintPrice,
         uint256 _maxSupply,
         uint8 _maxCountPerAddress,
         string memory _uri,
         uint96 royaltyFraction,
         TimeZone memory _timezone,
-        MintTime memory _privateMintTime,
-        MintTime memory _publicMintTime,
+        MintTimeStruct memory mintTime,
         address _tokenContract
     ) ERC721(name, symbol) {
         mintPrice = _mintPrice;
@@ -64,8 +88,9 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         maxCountPerAddress = _maxCountPerAddress;
         baseURI = _uri;
         timeZone = _timezone;
-        privateMintTime = _privateMintTime;
-        publicMintTime = _publicMintTime;
+        privateMintTime = mintTime.privateMintTime;
+        luckyMintTime = mintTime.luckyMintTime;
+        publicMintTime = mintTime.publicMintTime;
         tokenContract = _tokenContract;
         _setDefaultRoyalty(_msgSender(), royaltyFraction);
     }
@@ -98,6 +123,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         return(
             MintState(
                 privateClaimList[owner],
+                luckyClaimList[owner],
                 publicClaimList[owner]
             )
         );
@@ -107,12 +133,24 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         baseURI = _uri;
     }
 
-    function changeMerkleRoot(bytes32 _merkleRoot) public onlyOwner {
-        merkleRoot = _merkleRoot;
+    function changePrivateMerkleRoot(bytes32 _merkleRoot) public onlyOwner {
+        merkleRoot.privateMerkleRoot = _merkleRoot;
     }
 
-    function changeMintPrice(uint256 _mintPrice) public onlyOwner {
-        mintPrice = _mintPrice;
+    function changeLuckyMerkleRoot(bytes32 _merkleRoot) public onlyOwner {
+        merkleRoot.luckyMerkleRoot = _merkleRoot;
+    }
+
+    function changePrivateMintPrice(uint256 _mintPrice) public onlyOwner {
+        mintPrice.privateMintPrice = _mintPrice;
+    }
+
+    function changeLuckyMintPrice(uint256 _mintPrice) public onlyOwner {
+        mintPrice.luckyMintPrice = _mintPrice;
+    }
+
+    function changePublicMintPrice(uint256 _mintPrice) public onlyOwner {
+        mintPrice.publicMintPrice = _mintPrice;
     }
 
     function changeMaxSupply(uint256 _maxSupply) public onlyOwner {
@@ -135,12 +173,17 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         privateMintTime = _mintTime;
     }
 
+    function changeLuckyMintTime(MintTime memory _mintTime) public onlyOwner {
+        luckyMintTime = _mintTime;
+    }
+
     function changePublicMintTime(MintTime memory _mintTime) public onlyOwner {
         publicMintTime = _mintTime;
     }
 
-    function changeMintTime(MintTime memory _publicMintTime, MintTime memory _privateMintTime) public onlyOwner {
+    function changeMintTime(MintTime memory _publicMintTime, MintTime memory _luckyMintTime, MintTime memory _privateMintTime) public onlyOwner {
         privateMintTime = _privateMintTime;
+        luckyMintTime = _luckyMintTime;
         publicMintTime = _publicMintTime;
     }
 
@@ -148,9 +191,10 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         _operatorFilterAddresses = _addresses;
     }
 
-    function changeOperatorFilterAddressesAndMintTime(address[] memory _addresses, MintTime memory _publicMintTime, MintTime memory _privateMintTime) public onlyOwner {
+    function changeOperatorFilterAddressesAndMintTime(address[] memory _addresses, MintTime memory _publicMintTime, MintTime memory _privateMintTime, MintTime memory _luckyMintTime) public onlyOwner {
         _operatorFilterAddresses = _addresses;
         privateMintTime = _privateMintTime;
+        luckyMintTime = _luckyMintTime;
         publicMintTime = _publicMintTime;
     }
 
@@ -158,7 +202,15 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         return _operatorFilterAddresses;
     }
 
-    function privateMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof) external payable {
+    function privateMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof) public payable {
+        _privateMint(quantity, whiteQuantity, merkleProof, _msgSender());
+    }
+
+    function privateMintFor(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof, address receiver) public payable {
+        _privateMint(quantity, whiteQuantity, merkleProof, receiver);
+    }
+
+    function _privateMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof, address receiver) internal {
         require(block.timestamp >= privateMintTime.startAt && block.timestamp <= privateMintTime.endAt, "error: 10000 time is not allowed");
         uint256 supply = totalSupply();
         require(supply + quantity <= maxSupply, "error: 10001 supply exceeded");
@@ -166,30 +218,74 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         require(!privateClaimList[claimAddress], "error:10003 already claimed");
         require(quantity <= whiteQuantity, "error: 10004 quantity is not allowed");
         require(
-            MerkleProof.verify(merkleProof, merkleRoot, keccak256(abi.encodePacked(claimAddress, whiteQuantity))),
+            MerkleProof.verify(merkleProof, merkleRoot.privateMerkleRoot, keccak256(abi.encodePacked(claimAddress, whiteQuantity))),
             "error:10004 not in the whitelist"
         );
 
 
         if (tokenContract == address(0)) {
-            require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
+            require(mintPrice.privateMintPrice * quantity <= msg.value, "error: 10002 price insufficient");
         } else {
-            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice * quantity));
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice.privateMintPrice * quantity));
             require(
                 success && (data.length == 0 || abi.decode(data, (bool))),
                 "error: 10002 price insufficient"
             );
         }
-
         privateClaimList[claimAddress] = true;
-        _privateMintCount = _privateMintCount + quantity;
+        mintCount.privateMintCount = mintCount.privateMintCount + quantity;
+        for(uint256 i; i < quantity; i++){
+            _safeMint( receiver, supply + i );
+        }
+
+    }
+
+    function luckyMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof) external payable {
+        _luckyMint(quantity, whiteQuantity, merkleProof, _msgSender());
+    }
+    function luckyMintFor(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof, address receiver) external payable {
+        _luckyMint(quantity, whiteQuantity, merkleProof, receiver);
+    }
+
+    function _luckyMint(uint256 quantity, uint256 whiteQuantity, bytes32[] calldata merkleProof, address receiver) internal {
+        require(block.timestamp >= luckyMintTime.startAt && block.timestamp <= luckyMintTime.endAt, "error: 10000 time is not allowed");
+        uint256 supply = totalSupply();
+        require(supply + quantity <= maxSupply, "error: 10001 supply exceeded");
+        address claimAddress = _msgSender();
+        require(!luckyClaimList[claimAddress], "error:10003 already claimed");
+        require(quantity <= whiteQuantity, "error: 10004 quantity is not allowed");
+        require(
+            MerkleProof.verify(merkleProof, merkleRoot.luckyMerkleRoot, keccak256(abi.encodePacked(claimAddress, whiteQuantity))),
+            "error:10004 not in the whitelist"
+        );
+
+
+        if (tokenContract == address(0)) {
+            require(mintPrice.luckyMintPrice * quantity <= msg.value, "error: 10002 price insufficient");
+        } else {
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice.luckyMintPrice * quantity));
+            require(
+                success && (data.length == 0 || abi.decode(data, (bool))),
+                "error: 10002 price insufficient"
+            );
+        }
+        luckyClaimList[claimAddress] = true;
+        mintCount.luckyMintCount = mintCount.luckyMintCount + quantity;
 
         for(uint256 i; i < quantity; i++){
-            _safeMint( claimAddress, supply + i );
+            _safeMint( receiver, supply + i );
         }
     }
 
     function publicMint(uint256 quantity) external payable {
+        _publicMint(quantity, _msgSender());
+    }
+
+    function publicMintFor(uint256 quantity, address receiver) external payable {
+        _publicMint(quantity, receiver);
+    }
+
+    function _publicMint(uint256 quantity, address receiver) internal {
         require(block.timestamp >= publicMintTime.startAt && block.timestamp <= publicMintTime.endAt, "error: 10000 time is not allowed");
         require(quantity <= maxCountPerAddress, "error: 10004 max per address exceeded");
         uint256 supply = totalSupply();
@@ -198,9 +294,9 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         require(!publicClaimList[claimAddress], "error:10003 already claimed");
         // _safeMint(claimAddress, quantity);
         if (tokenContract == address(0)) {
-            require(mintPrice * quantity <= msg.value, "error: 10002 price insufficient");
+            require(mintPrice.publicMintPrice * quantity <= msg.value, "error: 10002 price insufficient");
         } else {
-            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice * quantity));
+            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0x23b872dd, claimAddress, address(this), mintPrice.publicMintPrice * quantity));
             require(
                 success && (data.length == 0 || abi.decode(data, (bool))),
                 "error: 10002 price insufficient"
@@ -208,7 +304,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         }
         publicClaimList[claimAddress] = true;
         for(uint256 i; i < quantity; i++){
-            _safeMint( claimAddress, supply + i );
+            _safeMint( receiver, supply + i );
         }
     }
 
