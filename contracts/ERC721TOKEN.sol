@@ -27,7 +27,6 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
     MintTime public privateMintTime;
     MintTime public luckyMintTime;
     MintTime public publicMintTime;
-    TimeZone public timeZone;
     Fee[] private fees;
 
     struct Fee {
@@ -62,11 +61,6 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         uint256 luckyMintCount;
     }
 
-    struct TimeZone {
-        int8 offset;
-        string text;
-    }
-
     struct MintState {
         bool privateMinted;
         bool luckyMinted;
@@ -86,7 +80,6 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         string memory _uri,
         uint96 royaltyFraction,
         Fee[] memory _fees,
-        TimeZone memory _timezone,
         MintTimeStruct memory mintTime,
         address _tokenContract
     ) ERC721(name, symbol) {
@@ -94,7 +87,6 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         maxSupply = _maxSupply;
         maxCountPerAddress = _maxCountPerAddress;
         baseURI = _uri;
-        timeZone = _timezone;
         privateMintTime = mintTime.privateMintTime;
         luckyMintTime = mintTime.luckyMintTime;
         publicMintTime = mintTime.publicMintTime;
