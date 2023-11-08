@@ -28,7 +28,13 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
     MintTime public luckyMintTime;
     MintTime public publicMintTime;
     TimeZone public timeZone;
+    Fee[] private fees;
 
+    struct Fee {
+        address destination;
+        uint256 payableercent;
+    }
+    
     struct MintTime {
         uint64 startAt;
         uint64 endAt;
@@ -79,6 +85,7 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         uint8 _maxCountPerAddress,
         string memory _uri,
         uint96 royaltyFraction,
+        Fee[] memory _fees,
         TimeZone memory _timezone,
         MintTimeStruct memory mintTime,
         address _tokenContract
@@ -93,6 +100,20 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
         publicMintTime = mintTime.publicMintTime;
         tokenContract = _tokenContract;
         _setDefaultRoyalty(_msgSender(), royaltyFraction);
+        for (uint256 i = 0; i < _fees.length; i++) {
+            fees.push(_fees[i]);
+        }
+    }
+
+    function feeInfo() public view returns (Fee[] memory) {
+        uint256 ownerFee = 10000;
+        Fee[] memory _fees = new Fee[](fees.length + 1);
+        for (uint256 i = 0; i < fees.length; i++) {
+            ownerFee = ownerFee - fees[i].payableercent;
+            _fees[i] = fees[i];
+        }
+        _fees[fees.length] = Fee(owner(), ownerFee);
+        return _fees;
     }
 
     modifier onlyAllowedOperatorApproval(address operator) {
@@ -353,16 +374,24 @@ contract ERC721TOKEN is ERC2981, ERC721Enumerable, Ownable {
 
     // This allows the contract owner to withdraw the funds from the contract.
     function withdraw(uint amt) external onlyOwner {
+        Fee[] memory feeInfos = feeInfo();
         if (tokenContract == address(0)) {
-            (bool sent, ) = payable(_msgSender()).call{value: amt}("");
-            require(sent, "GG: Failed to withdraw Ether");
+            require(amt <= address(this).balance, "GG: Insufficient balance");
+            for(uint256 i = 0; i < feeInfos.length; i++) {
+                (bool sent, ) = payable(feeInfos[i].destination).call{value: amt * feeInfos[i].payableercent / 10000}("");
+                require(sent, "GG: Failed to withdraw Ether");
+            }
         } else {
-            (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0xa9059cbb, _msgSender(), amt));
-            require(
-                success && (data.length == 0 || abi.decode(data, (bool))),
-                "GG: Failed to withdraw Ether"
-            );
+            (, bytes memory balance) = tokenContract.call(abi.encodeWithSelector(0x70a08231, address(this)));
+            
+            require(amt <= abi.decode(balance, (uint256)), "GG: Insufficient balance");
+            for(uint256 i = 0; i < feeInfos.length; i++) {
+                (bool success, bytes memory data) = tokenContract.call(abi.encodeWithSelector(0xa9059cbb, feeInfos[i].destination, amt * fees[i].payableercent / 10000));
+                require(
+                    success && (data.length == 0 || abi.decode(data, (bool))),
+                    "GG: Failed to withdraw Ether"
+                );
+            }
         }
-
     }
 }
